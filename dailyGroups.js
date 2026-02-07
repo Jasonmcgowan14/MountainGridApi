@@ -10,7 +10,6 @@ const { parser } = streamJson;
 import streamJsonStreamers from "stream-json/streamers/StreamArray.js";
 const { streamArray } = streamJsonStreamers;
 
-
 function pad2(n) {
   return String(n).padStart(2, "0");
 }
@@ -25,8 +24,8 @@ function extractLocalDateParts(activity) {
   const iso = activity.start_date_local ?? activity.start_date;
   if (!iso) return null;
 
-  // "2026-02-03T16:08:11Z" or "...:11Z" or sometimes without Z
-  const datePart = iso.slice(0, 10);  // YYYY-MM-DD
+  // "2026-02-03T16:08:11Z" or sometimes without Z
+  const datePart = iso.slice(0, 10); // YYYY-MM-DD
   const timePart = iso.slice(11, 16); // HH:MM
 
   const month = datePart.slice(5, 7);
@@ -47,8 +46,8 @@ function summarizeActivity(a) {
     id: a.id,
     name: a.name ?? null,
     sport,
-    // keep both the grouped key and the actual date (year kept for context)
-    dayKey: parts?.key ?? null,         // "MM-DD"
+    // grouped key + actual date/time
+    dayKey: parts?.key ?? null, // "MM-DD"
     dateLocal: parts?.fullDate ?? null, // "YYYY-MM-DD"
     startTimeLocal: parts?.time ?? null, // "HH:MM"
 
@@ -63,7 +62,6 @@ function summarizeActivity(a) {
     timezone: a.timezone ?? null,
     utc_offset: a.utc_offset ?? null,
 
-    // “some location data” without getting too deep
     start_latlng: Array.isArray(a.start_latlng) ? a.start_latlng : null,
     end_latlng: Array.isArray(a.end_latlng) ? a.end_latlng : null,
     location_city: a.location_city ?? null,
@@ -73,12 +71,74 @@ function summarizeActivity(a) {
 }
 
 /**
- * Streams activities.json (root array) and groups by MM-DD ignoring year.
+ * Pure function: group an array of Strava activities (objects) by MM-DD ignoring year.
  * Returns:
  * [
  *   { dayKey: "02-03", activities: [ ... ], count: 12, totalDistanceMi: 42.1 },
  *   ...
  * ]
+ */
+export function buildGroupedByDayFromActivities(activities) {
+  const groups = new Map(); // "MM-DD" -> array of summaries
+
+  for (const value of activities ?? []) {
+    const parts = extractLocalDateParts(value);
+    if (!parts?.key) continue;
+
+    const summary = summarizeActivity(value);
+    const arr = groups.get(parts.key) ?? [];
+    arr.push(summary);
+    groups.set(parts.key, arr);
+  }
+
+  // Turn map into sorted response
+  const result = [];
+  for (const [dayKey, dayActivities] of groups.entries()) {
+    // Sort activities within a day by time, then by date
+    dayActivities.sort((a, b) => {
+      const t = String(a.startTimeLocal ?? "").localeCompare(String(b.startTimeLocal ?? ""));
+      if (t !== 0) return t;
+      return String(a.dateLocal ?? "").localeCompare(String(b.dateLocal ?? ""));
+    });
+
+    const totalDistanceMi = dayActivities.reduce((sum, x) => sum + (x.distance_mi ?? 0), 0);
+
+    result.push({
+      dayKey,
+      count: dayActivities.length,
+      totalDistanceMi,
+      activities: dayActivities,
+    });
+  }
+
+  // Sort by month-day
+  result.sort((a, b) => a.dayKey.localeCompare(b.dayKey));
+  return result;
+}
+
+/**
+ * Pure function: counts per MM-DD ignoring year.
+ * Returns: { "01-11": 5, "02-03": 12, ... }
+ */
+export function buildDayCountsFromActivities(activities) {
+  const counts = new Map(); // "MM-DD" -> number
+
+  for (const value of activities ?? []) {
+    const parts = extractLocalDateParts(value);
+    if (!parts?.key) continue;
+
+    counts.set(parts.key, (counts.get(parts.key) ?? 0) + 1);
+  }
+
+  const out = {};
+  for (const [k, v] of counts.entries()) out[k] = v;
+
+  // keep it sorted by key
+  return Object.fromEntries(Object.entries(out).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+/**
+ * Streams activities.json (root array) and groups by MM-DD ignoring year.
  */
 export async function buildGroupedByDay(filePath) {
   const groups = new Map(); // "MM-DD" -> array of summaries
@@ -104,10 +164,14 @@ export async function buildGroupedByDay(filePath) {
     pipeline.on("error", reject);
   });
 
-  // Turn map into sorted response
+  // reuse the exact same formatting logic as the DB path
+  const flattened = [];
+  for (const [, arr] of groups.entries()) flattened.push(...arr);
+
+  // BUT: buildGroupedByDayFromActivities expects raw activities, not summaries.
+  // So we keep the original logic below for file mode.
   const result = [];
   for (const [dayKey, activities] of groups.entries()) {
-    // Sort activities within a day by time, then by date
     activities.sort((a, b) => {
       const t = String(a.startTimeLocal ?? "").localeCompare(String(b.startTimeLocal ?? ""));
       if (t !== 0) return t;
@@ -124,14 +188,12 @@ export async function buildGroupedByDay(filePath) {
     });
   }
 
-  // Sort by month-day
   result.sort((a, b) => a.dayKey.localeCompare(b.dayKey));
   return result;
 }
 
 /**
  * Streams activities.json and returns counts per MM-DD ignoring year.
- * Returns: { "01-11": 5, "02-03": 12, ... }
  */
 export async function buildDayCounts(filePath) {
   const counts = new Map(); // "MM-DD" -> number
@@ -154,11 +216,8 @@ export async function buildDayCounts(filePath) {
     pipeline.on("error", reject);
   });
 
-  // convert Map -> plain object
   const out = {};
   for (const [k, v] of counts.entries()) out[k] = v;
 
-  // optional: keep it sorted by key
   return Object.fromEntries(Object.entries(out).sort(([a], [b]) => a.localeCompare(b)));
 }
-
