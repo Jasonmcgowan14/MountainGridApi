@@ -1,0 +1,19 @@
+[
+  {
+    "resource_state": 2,
+    "athlete": { "id": 32783618, "resource_state": 1 },
+    "id": 17302271823,
+    "name": "Test Ride",
+    "type": "Ride",
+    "sport_type": "Ride",
+    "distance": 21966.2,
+    "moving_time": 5591,
+    "elapsed_time": 5709,
+    "total_elevation_gain": 481.0,
+    "start_date": "2026-02-05T23:06:51Z",
+    "start_date_local": "2026-02-05T16:06:51Z",
+    "timezone": "(GMT-07:00) America/Denver",
+    "utc_offset": -25200.0,
+    "map": { "id": "a17302271823", "summary_polyline": "", "resource_state": 2 }
+  }
+]
