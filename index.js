@@ -177,7 +177,11 @@ app.post("/api/cache/clear", (req, res) => {
 // --------------------
 // Server
 // --------------------
-const port = process.env.PORT || 3000;
+
+
+// If broken check here comment out 3000 for prod, comment in for local
+// const port = process.env.PORT || 3000;
+const port = process.env.PORT;
 app.listen(port, () => {
   console.log(`✅ Server running on http://localhost:${port}`);
 });
