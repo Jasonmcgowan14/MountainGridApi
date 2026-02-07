@@ -102,7 +102,7 @@ app.get("/api/activities/day-counts", async (req, res) => {
  * Server start
  * ============================
  */
-const port = process.env.PORT || 3000;
+const port = process.env.PORT;
 app.listen(port, () => {
   console.log("====================================");
   console.log(`✅ Server running on http://localhost:${port}`);
