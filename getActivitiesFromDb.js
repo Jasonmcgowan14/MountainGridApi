@@ -1,7 +1,11 @@
 // getActivitiesFromDb.js
 import { pool } from "./db.js";
 
-export async function getActivitiesFromDb({ userId = 1, limit = 5000 } = {}) {
+export async function getActivitiesFromDb({ userId, limit = 5000 } = {}) {
+  if (userId == null) {
+    throw new Error("getActivitiesFromDb: userId is required");
+  }
+
   const sql = `
     SELECT payload
     FROM activities
@@ -13,5 +17,5 @@ export async function getActivitiesFromDb({ userId = 1, limit = 5000 } = {}) {
   const result = await pool.query(sql, [userId, limit]);
 
   // payload comes back as a JS object already (jsonb)
-  return result.rows.map(r => r.payload);
+  return result.rows.map((r) => r.payload);
 }

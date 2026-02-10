@@ -1,5 +1,10 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import { admin } from "./firebaseAdmin.js";
+import { requireAuth } from "./requireAuth.js";
+import { requireDbUser } from "./requireDbUser.js";
+
 import { getActivitiesFromDb } from "./getActivitiesFromDb.js";
 import {
   buildGroupedByDayFromActivities,
@@ -8,72 +13,115 @@ import {
 import { createManualActivityInDb } from "./createManualActivityInDb.js";
 
 const app = express();
-app.use(cors());
+const corsOptions = {
+  origin: [
+    "http://localhost:4200",
+    "http://127.0.0.1:4200",
+    "https://mountaingridangular.onrender.com",
+  ],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions)); // ✅ handle preflight for all routes
+
+
 app.use(express.json());
 
 // --------------------
-// Simple in-memory cache
+// Simple in-memory cache (PER USER)
 // --------------------
-let cachedGroups = null;
-let buildingGroups = null;
+const cachedGroupsByUser = new Map(); // userId -> grouped data
+const buildingGroupsByUser = new Map(); // userId -> Promise
 
-let cachedCounts = null;
-let buildingCounts = null;
+const cachedCountsByUser = new Map(); // userId -> counts data
+const buildingCountsByUser = new Map(); // userId -> Promise
 
-function invalidateCaches(reason = "") {
-  cachedGroups = null;
-  buildingGroups = null;
+function invalidateCachesForUser(userId, reason = "") {
+  cachedGroupsByUser.delete(userId);
+  buildingGroupsByUser.delete(userId);
 
-  cachedCounts = null;
-  buildingCounts = null;
+  cachedCountsByUser.delete(userId);
+  buildingCountsByUser.delete(userId);
 
-  console.log(`🧹 invalidateCaches${reason ? ` - ${reason}` : ""}`);
+  console.log(`🧹 invalidateCachesForUser(${userId})${reason ? ` - ${reason}` : ""}`);
 }
 
-const DEFAULT_USER_ID = Number(process.env.DEFAULT_USER_ID || 1);
+function invalidateAllCaches(reason = "") {
+  cachedGroupsByUser.clear();
+  buildingGroupsByUser.clear();
 
-// --------------------
-// Cached getters
-// --------------------
-async function getGroupedData() {
-  if (cachedGroups) {
-    console.log("🟡 /by-day served from cache");
-    return cachedGroups;
-  }
+  cachedCountsByUser.clear();
+  buildingCountsByUser.clear();
 
-  if (!buildingGroups) {
-    console.log("🟢 /by-day rebuilding from DB");
-    buildingGroups = (async () => {
-      const activities = await getActivitiesFromDb({ userId: DEFAULT_USER_ID });
-      cachedGroups = buildGroupedByDayFromActivities(activities);
-      return cachedGroups;
-    })();
-  }
-
-  return buildingGroups;
+  console.log(`🧹 invalidateAllCaches${reason ? ` - ${reason}` : ""}`);
 }
 
-async function getDayCounts() {
-  if (cachedCounts) {
-    console.log("🟡 /day-counts served from cache");
-    return cachedCounts;
+// --------------------
+// Cached getters (PER USER)
+// --------------------
+async function getGroupedData(userId) {
+  if (cachedGroupsByUser.has(userId)) {
+    console.log(`🟡 /by-day served from cache (userId=${userId})`);
+    return cachedGroupsByUser.get(userId);
   }
 
-  if (!buildingCounts) {
-    console.log("🟢 /day-counts rebuilding from DB");
-    buildingCounts = (async () => {
-      const activities = await getActivitiesFromDb({ userId: DEFAULT_USER_ID });
-      cachedCounts = buildDayCountsFromActivities(activities);
-      return cachedCounts;
-    })();
+  if (!buildingGroupsByUser.has(userId)) {
+    console.log(`🟢 /by-day rebuilding from DB (userId=${userId})`);
+    buildingGroupsByUser.set(
+      userId,
+      (async () => {
+        const activities = await getActivitiesFromDb({ userId });
+        const grouped = buildGroupedByDayFromActivities(activities);
+        cachedGroupsByUser.set(userId, grouped);
+        buildingGroupsByUser.delete(userId);
+        return grouped;
+      })()
+    );
   }
 
-  return buildingCounts;
+  return buildingGroupsByUser.get(userId);
+}
+
+async function getDayCounts(userId) {
+  if (cachedCountsByUser.has(userId)) {
+    console.log(`🟡 /day-counts served from cache (userId=${userId})`);
+    return cachedCountsByUser.get(userId);
+  }
+
+  if (!buildingCountsByUser.has(userId)) {
+    console.log(`🟢 /day-counts rebuilding from DB (userId=${userId})`);
+    buildingCountsByUser.set(
+      userId,
+      (async () => {
+        const activities = await getActivitiesFromDb({ userId });
+        const counts = buildDayCountsFromActivities(activities);
+        cachedCountsByUser.set(userId, counts);
+        buildingCountsByUser.delete(userId);
+        return counts;
+      })()
+    );
+  }
+
+  return buildingCountsByUser.get(userId);
 }
 
 // --------------------
 // Routes
 // --------------------
+
+app.get("/api/debug/dbuser", requireAuth, requireDbUser, (req, res) => {
+  res.json({
+    ok: true,
+    firebaseUid: req.user.uid,
+    dbUser: req.dbUser,
+  });
+});
+
+
+// Public health check (ok to keep public)
 app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
@@ -82,11 +130,18 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-app.get("/api/activities/by-day", async (req, res) => {
-  try {
-    const data = await getGroupedData();
-    const { dayKey } = req.query;
+// 🔒 Who am I (Firebase identity)
+app.get("/api/whoami", requireAuth, (req, res) => {
+  res.json({ ok: true, user: req.user });
+});
 
+// 🔒 Protect: grouped-by-day data (scoped to caller)
+app.get("/api/activities/by-day", requireAuth, requireDbUser, async (req, res) => {
+  try {
+    const userId = req.dbUser.id;
+    const data = await getGroupedData(userId);
+
+    const { dayKey } = req.query;
     if (dayKey) {
       const one = data.find((g) => g.dayKey === dayKey);
       return res.json(one ?? null);
@@ -98,20 +153,24 @@ app.get("/api/activities/by-day", async (req, res) => {
   }
 });
 
-app.get("/api/activities/day-counts", async (req, res) => {
+// 🔒 Protect: day counts (scoped to caller)
+app.get("/api/activities/day-counts", requireAuth, requireDbUser, async (req, res) => {
   try {
-    const counts = await getDayCounts();
+    const userId = req.dbUser.id;
+    const counts = await getDayCounts(userId);
     return res.json(counts);
   } catch (err) {
     return res.status(500).json({ error: String(err?.message ?? err) });
   }
 });
 
-app.get("/api/activities", async (req, res) => {
+// 🔒 Protect: raw activities (scoped to caller)
+app.get("/api/activities", requireAuth, requireDbUser, async (req, res) => {
   try {
-    const userId = Number(req.query.userId ?? DEFAULT_USER_ID);
+    const userId = req.dbUser.id;
     const limit = Number(req.query.limit ?? 5000);
 
+    // IMPORTANT: no userId from query/body. Always from verified token -> DB user.
     const activities = await getActivitiesFromDb({ userId, limit });
     return res.json(activities);
   } catch (err) {
@@ -119,11 +178,12 @@ app.get("/api/activities", async (req, res) => {
   }
 });
 
-app.post("/api/activities/manual", async (req, res) => {
+// 🔒 Protect: create manual activity (scoped to caller)
+app.post("/api/activities/manual", requireAuth, requireDbUser, async (req, res) => {
   try {
     console.log("✅ POST /api/activities/manual");
 
-    const userId = DEFAULT_USER_ID; // assume everything is you for now
+    const userId = req.dbUser.id;
 
     const {
       name,
@@ -158,8 +218,8 @@ app.post("/api/activities/manual", async (req, res) => {
       notes: notes == null ? null : String(notes),
     });
 
-    // Bust caches so /by-day and /day-counts reflect the new row
-    invalidateCaches("manual activity created");
+    // Bust caches so /by-day and /day-counts reflect the new row (for this user only)
+    invalidateCachesForUser(userId, "manual activity created");
 
     return res.status(201).json(created);
   } catch (err) {
@@ -168,20 +228,36 @@ app.post("/api/activities/manual", async (req, res) => {
   }
 });
 
-// Optional: manual cache clear endpoint for debugging
-app.post("/api/cache/clear", (req, res) => {
-  invalidateCaches("manual clear endpoint");
+// 🔒 Protect: cache clear
+app.post("/api/cache/clear", requireAuth, requireDbUser, (req, res) => {
+  // Allow clearing only your own caches
+  const userId = req.dbUser.id;
+  invalidateCachesForUser(userId, "manual clear endpoint");
   res.json({ ok: true });
 });
+
+// Debug route (keep public only locally; consider removing/locking in prod)
+app.get("/api/debug/firebase", (req, res) => {
+  try {
+    const appInstance = admin.app();
+    res.json({
+      ok: true,
+      appName: appInstance.name,
+      projectId: appInstance.options.projectId ?? null,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err?.message ?? err) });
+  }
+});
+
 
 // --------------------
 // Server
 // --------------------
 
-
 // If broken check here comment out 3000 for prod, comment in for local
-// const port = process.env.PORT || 3000;
+//const port = process.env.PORT || 3000;
 const port = process.env.PORT;
 app.listen(port, () => {
-  console.log(`✅ Server running on http://localhost:${port}`);
+    console.log(`✅ Server running on http://localhost:${port}`);
 });

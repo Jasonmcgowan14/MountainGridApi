@@ -1,11 +1,11 @@
 import fs from "fs";
 import { pool } from "./db.js";
 
-const USER_ID = 1; // temporary user id for now
+const USER_ID = 2; // temporary user id for now
 
 async function migrate() {
     console.log("Reading JSON file...");
-    const raw = fs.readFileSync("./activities.json", "utf-8");
+    const raw = fs.readFileSync("./activitiesshay.json", "utf-8");
     console.log("Parsing JSON...");
     const activities = JSON.parse(raw);
     console.log("Loaded activities:", activities.length);
