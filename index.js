@@ -4,6 +4,8 @@ import cors from "cors";
 import { admin } from "./firebaseAdmin.js";
 import { requireAuth } from "./requireAuth.js";
 import { requireDbUser } from "./requireDbUser.js";
+import { getPeaksFromDb } from "./getPeaksFromDb.js";
+
 
 import { getActivitiesFromDb } from "./getActivitiesFromDb.js";
 import {
@@ -126,8 +128,20 @@ app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     usingDb: true,
-    routes: ["by-day", "day-counts", "activities", "activities/manual"],
+    routes: ["by-day", "day-counts", "activities", "activities/manual", "peaks"],
   });
+});
+
+app.get("/api/peaks", requireAuth, requireDbUser, async (req, res) => {
+  try {
+    const limit = Number(req.query.limit ?? 5000);
+    const state = req.query.state ? String(req.query.state) : null;
+
+    const peaks = await getPeaksFromDb({ state, limit });
+    return res.json(peaks);
+  } catch (err) {
+    return res.status(500).json({ error: String(err?.message ?? err) });
+  }
 });
 
 // 🔒 Who am I (Firebase identity)
