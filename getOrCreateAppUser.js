@@ -2,18 +2,23 @@
 import { pool } from "./db.js";
 
 /**
- * Returns the app_user row for a firebase uid.
- * DOES NOT create.
+ * Get-or-create the app_user row for a firebase uid.
+ * Safe to call repeatedly (idempotent).
+ *
+ * Requires: UNIQUE(firebase_uid) on public.app_user
  */
-export async function getOrCreateAppUser({ firebaseUid }) {
+export async function getOrCreateAppUser({ firebaseUid, email = null, displayName = null }) {
   const sql = `
-    SELECT id, firebase_uid, email, display_name
-    FROM public.app_user
-    WHERE firebase_uid = $1
-    LIMIT 1
+    INSERT INTO public.app_user (firebase_uid, email, display_name, last_seen_at)
+    VALUES ($1, $2, $3, NOW())
+    ON CONFLICT (firebase_uid)
+    DO UPDATE SET
+      email = COALESCE(EXCLUDED.email, public.app_user.email),
+      display_name = COALESCE(EXCLUDED.display_name, public.app_user.display_name),
+      last_seen_at = NOW()
+    RETURNING id, firebase_uid, email, display_name, created_at, last_seen_at
   `;
 
-  const result = await pool.query(sql, [firebaseUid]);
-  return result.rows[0] ?? null;
+  const result = await pool.query(sql, [String(firebaseUid), email, displayName]);
+  return result.rows[0];
 }
-

@@ -9,11 +9,11 @@ export async function requireDbUser(req, res, next) {
 
     const dbUser = await getOrCreateAppUser({
       firebaseUid,
-      email: req.user.email ?? null,
-      displayName: null, // optionally from token if present
+      email: req.user?.email ?? null,
+      displayName: req.user?.name ?? req.user?.displayName ?? null, // ✅ use token values if present
     });
 
-    req.dbUser = dbUser; // { id, firebase_uid, email, display_name }
+    req.dbUser = dbUser; // { id, firebase_uid, email, display_name, ... }
     next();
   } catch (err) {
     return res.status(500).json({ error: String(err?.message ?? err) });
