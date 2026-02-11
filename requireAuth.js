@@ -16,6 +16,7 @@ export async function requireAuth(req, res, next) {
     req.user = {
       uid: decoded.uid,
       email: decoded.email ?? null,
+      name: decoded.name ?? null,
     };
 
     next();
