@@ -5,6 +5,7 @@ import { admin } from "./firebaseAdmin.js";
 import { requireAuth } from "./requireAuth.js";
 import { requireDbUser } from "./requireDbUser.js";
 import { getPeaksFromDb } from "./getPeaksFromDb.js";
+import { getRangesFromDb } from "./getRangesFromDb.js";
 
 
 import { getActivitiesFromDb } from "./getActivitiesFromDb.js";
@@ -120,6 +121,16 @@ app.get("/api/debug/dbuser", requireAuth, requireDbUser, (req, res) => {
     firebaseUid: req.user.uid,
     dbUser: req.dbUser,
   });
+});
+
+app.get("/api/ranges", requireAuth, requireDbUser, async (req, res) => {
+  try {
+    const rows = await getRangesFromDb();
+    res.json(rows);
+  } catch (err) {
+    console.error("GET /api/ranges failed", err);
+    res.status(500).json({ error: "Failed to load ranges" });
+  }
 });
 
 
@@ -263,7 +274,6 @@ app.get("/api/debug/firebase", (req, res) => {
     res.status(500).json({ ok: false, error: String(err?.message ?? err) });
   }
 });
-
 
 // --------------------
 // Server

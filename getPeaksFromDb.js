@@ -21,6 +21,7 @@ export async function getPeaksFromDb({ state = null, limit = 5000 } = {}) {
         peak_id,
         peak_name,
         state,
+        range_id,
         latitude,
         longitude,
         enter_m,
