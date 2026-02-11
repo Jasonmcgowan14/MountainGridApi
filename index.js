@@ -21,7 +21,8 @@ const corsOptions = {
     "http://localhost:4200",
     "http://127.0.0.1:4200",
     "https://mountaingridangular.onrender.com",
-    "https://mtngrid.com/"
+    "https://mtngrid.com/",
+    "https://www.mtngrid.com/"
   ],
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
